@@ -24,7 +24,7 @@ Agent Farm 保持 **central queue**，不是 agent 间的 P2P swarm。
 
 | 路径 | 职责 |
 |---|---|
-| `server/` | SQLite 000/001/002 migration 与 legacy backfill、领域状态机、Git/Agent SDK 执行、HTTP API、durable ledger/WebSocket replay、residual benchmark |
+| `server/` | SQLite 000/001/002/003 migration 与 legacy backfill、领域状态机、Git/Agent SDK 执行、HTTP API、durable ledger/WebSocket replay、residual benchmark |
 | `web-app/` | React 中央队列、dependency/overlap 解释、diff review、运行控制与 residual health |
 | `e2e/` | 隔离 HOME/data/repo/port 的真实 Git、SQLite、WebSocket、Playwright 和 provider-backed Agent SDK 测试 |
 | `docs/agent-farm/` | 架构、运维、恢复/回滚与机器契约 |

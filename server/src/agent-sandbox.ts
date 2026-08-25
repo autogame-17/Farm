@@ -156,7 +156,7 @@ async function runtimeReadRoots(cwd: string): Promise<string[]> {
   return [...roots];
 }
 
-async function gitReadRoots(cwd: string): Promise<string[]> {
+export async function gitReadRoots(cwd: string): Promise<string[]> {
   const dotGit = path.join(cwd, ".git");
   let stat: Awaited<ReturnType<typeof fs.lstat>>;
   try {

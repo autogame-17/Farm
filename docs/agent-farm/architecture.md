@@ -58,10 +58,10 @@ seeded → preparing → seeded → running → review_pending → harvesting �
 Run 状态：
 
 ```text
-queued → running → succeeded | failed | cancelled | timed_out | provider_blocked | crashed
+queued → running → succeeded | failed | cancelled | timed_out | provider_blocked | sandbox_blocked | crashed
 ```
 
-只有 SDK `result.subtype === "success" && result.is_error === false` 才是成功；success subtype 但 `is_error=true` 仍失败。Async iterator 结束但无 result 是 `crashed`；SDK `error_*` result 是失败。取消和超时都调用 `Query.interrupt()` 与 `AbortController.abort()`。SDK query 使用 `settingSources: []`、default permission + `canUseTool` path guard，并要求 fail-closed sandbox；sandbox 不可用时不能降级为无隔离执行。
+只有 SDK `result.subtype === "success" && result.is_error === false` 才是成功；success subtype 但 `is_error=true` 仍失败。Async iterator 结束但无 result 是 `crashed`；SDK `error_*` result 是失败。取消和超时都调用 `Query.interrupt()` 与 `AbortController.abort()`。SDK query 使用 `settingSources: []`、default permission + `canUseTool` path guard，并要求 fail-closed two-level sandbox；Bash 只经 `mcp__workspace__bash` 进入 inner SRT，built-in Bash 被禁用。sandbox 不可用时记 `sandbox_blocked`（`provider_status=not_run`），不能降级为无隔离执行。outer SRT 对 linked worktree 的 gitdir/commondir 只读、禁止写入。Run 终态与 task 投影在同一 SQLite transaction 中提交；post-commit WebSocket 发布失败不得回滚已提交账本，客户端通过 REST/WS replay 补齐。
 
 重启不会假设 Agent SDK session 可恢复。未得到可证明的 durable result 时，原 run 进入 `crashed`，task 进入 `recovery_required`；用户必须显式选择 retry/recover，新 run 使用 `retry_of_run_id` 或 `recovery_of_run_id` 建立 lineage。
 

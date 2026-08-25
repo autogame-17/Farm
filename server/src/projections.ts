@@ -238,6 +238,9 @@ export interface TaskSummaryProjection {
   review_status: string | null;
   review_stale: boolean | null;
   outcome_status: string | null;
+  provider_status: string | null;
+  error_code: string | null;
+  error_message: string | null;
   row_version: number;
   group_id: string | null;
   group_state: DependencyGroupProjection["state"] | null;
@@ -694,6 +697,9 @@ export function taskSummary(rowOrId: TaskRow | string, diffVerified = false): Ta
       ? false
       : reviewIsStale(task),
     outcome_status: task.outcome_status,
+    provider_status: task.provider_status,
+    error_code: task.error_code,
+    error_message: task.error_message,
     row_version: task.row_version,
     group_id: group?.id ?? null,
     group_state: group?.state ?? null,

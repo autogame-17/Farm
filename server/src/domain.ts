@@ -1101,7 +1101,23 @@ async function finishRun(taskId: string, runId: string, terminal: SdkRunTerminal
       : terminal.status === "succeeded"
         ? "verified"
         : "failed";
-  const accepted = committedMutation((collector) => {
+  const taskStatus = terminal.status === "succeeded"
+    ? "review_pending"
+    : terminal.status === "provider_blocked" || terminal.status === "sandbox_blocked"
+      ? "blocked"
+      : terminal.status === "cancelled"
+        ? "cancelled"
+        : terminal.status === "crashed"
+          ? "recovery_required"
+          : "failed";
+  const reason = terminal.status === "succeeded"
+    ? null
+    : terminal.status === "provider_blocked"
+      ? "provider_auth_blocked"
+      : terminal.status === "sandbox_blocked"
+        ? "agent_sandbox_unavailable"
+        : `agent_${terminal.status}`;
+  committedMutation((collector) => {
     const current = db.prepare("SELECT status FROM agent_runs WHERE id = ?").get(runId) as { status: string } | undefined;
     if (!current || !ACTIVE_RUN_STATUSES.has(current.status)) return false;
     const event = recordAuditEvent(collector, {
@@ -1124,7 +1140,7 @@ async function finishRun(taskId: string, runId: string, terminal: SdkRunTerminal
       provenance: { kind: "agent_sdk_terminal", source: "claude_agent_sdk" },
       occurredAt: endedAt,
     });
-    const changed = db.prepare(`
+    const runChanged = db.prepare(`
       UPDATE agent_runs SET status = ?, provider_status = ?, sdk_session_id = ?, sdk_result_subtype = ?,
         heartbeat_at = ?, ended_at = ?, cost_usd = ?, num_turns = ?, duration_ms = ?, usage_json = ?,
         model_usage_json = ?, permission_denials_json = ?, error_code = ?, error_message = ?, terminal_event_seq = ?
@@ -1147,47 +1163,31 @@ async function finishRun(taskId: string, runId: string, terminal: SdkRunTerminal
       event.seq,
       runId,
     );
-    return changed.changes === 1;
-  });
-  if (!accepted) return;
+    if (runChanged.changes !== 1) return false;
 
-  if (terminal.status === "succeeded") {
-    committedMutation((collector) => {
+    if (terminal.status === "succeeded") {
       const changed = db.prepare(`
         UPDATE tasks SET status = 'review_pending', review_status = 'pending', provider_status = 'verified',
           total_cost_usd = ?, num_turns = ?, duration_ms = ?, error_code = NULL, error_message = NULL,
           updated_at = ?, row_version = row_version + 1
         WHERE id = ? AND current_run_id = ? AND status = 'running'
-      `).run(terminal.costUsd, terminal.numTurns, terminal.durationMs, Date.now(), taskId, runId);
-      if (changed.changes !== 1) return;
-      recordAuditEvent(collector, {
-        eventType: "task.review_pending",
-        entityType: "task",
-        entityId: taskId,
-        repositoryId: task.repository_id,
-        taskId,
-        runId,
-        payload: { diff_digest: task.current_diff_digest },
-        provenance: { kind: "state_transition", source: "domain" },
-      });
-    });
-    return;
-  }
+      `).run(terminal.costUsd, terminal.numTurns, terminal.durationMs, endedAt, taskId, runId);
+      if (changed.changes === 1) {
+        recordAuditEvent(collector, {
+          eventType: "task.review_pending",
+          entityType: "task",
+          entityId: taskId,
+          repositoryId: task.repository_id,
+          taskId,
+          runId,
+          payload: { diff_digest: task.current_diff_digest },
+          provenance: { kind: "state_transition", source: "domain" },
+        });
+      }
+      return true;
+    }
 
-  task = taskOrThrow(taskId);
-  const taskStatus = terminal.status === "provider_blocked" || terminal.status === "sandbox_blocked"
-    ? "blocked"
-    : terminal.status === "cancelled"
-      ? "cancelled"
-      : terminal.status === "crashed"
-        ? "recovery_required"
-        : "failed";
-  const reason = terminal.status === "provider_blocked"
-    ? "provider_auth_blocked"
-    : terminal.status === "sandbox_blocked"
-      ? "agent_sandbox_unavailable"
-      : `agent_${terminal.status}`;
-  committedMutation((collector) => {
+    const liveTask = db.prepare("SELECT blocking_reasons_json FROM tasks WHERE id = ?").get(taskId) as { blocking_reasons_json: string } | undefined;
     const changed = db.prepare(`
       UPDATE tasks SET status = ?, provider_status = ?, blocking_reasons_json = ?, total_cost_usd = ?,
         num_turns = ?, duration_ms = ?, error_code = ?, error_message = ?, updated_at = ?, row_version = row_version + 1
@@ -1195,27 +1195,29 @@ async function finishRun(taskId: string, runId: string, terminal: SdkRunTerminal
     `).run(
       taskStatus,
       providerStatus,
-      addReason(task.blocking_reasons_json, reason),
+      addReason(liveTask?.blocking_reasons_json ?? task.blocking_reasons_json, reason!),
       terminal.costUsd,
       terminal.numTurns,
       terminal.durationMs,
       terminal.errorCode,
       terminal.errorMessage,
-      Date.now(),
+      endedAt,
       taskId,
       runId,
     );
-    if (changed.changes !== 1) return;
-    recordAuditEvent(collector, {
-      eventType: `task.${taskStatus}`,
-      entityType: "task",
-      entityId: taskId,
-      repositoryId: task.repository_id,
-      taskId,
-      runId,
-      payload: { reason, error_code: terminal.errorCode, error_message: terminal.errorMessage },
-      provenance: { kind: "state_transition", source: "domain" },
-    });
+    if (changed.changes === 1) {
+      recordAuditEvent(collector, {
+        eventType: `task.${taskStatus}`,
+        entityType: "task",
+        entityId: taskId,
+        repositoryId: task.repository_id,
+        taskId,
+        runId,
+        payload: { reason, error_code: terminal.errorCode, error_message: terminal.errorMessage },
+        provenance: { kind: "state_transition", source: "domain" },
+      });
+    }
+    return true;
   });
 }
 
@@ -1429,16 +1431,24 @@ export async function submitReview(
       INSERT INTO reviews (id, task_id, decision, diff_digest, summary, reviewer, created_at, source_event_seq)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, taskId, decision, requestedDigest, summary, reviewer, now, event.seq);
-    db.prepare(`
+    const changed = db.prepare(`
       UPDATE tasks SET status = ?, review_status = ?, approved_diff_digest = ?,
-        outcome_status = NULL, updated_at = ?, row_version = row_version + 1 WHERE id = ?
+        outcome_status = NULL, updated_at = ?, row_version = row_version + 1
+      WHERE id = ? AND row_version = ? AND status IN ('review_pending', 'review_rejected')
     `).run(
       decision === "approved" ? "review_pending" : "review_rejected",
       decision,
       decision === "approved" ? requestedDigest : null,
       now,
       taskId,
+      task.row_version,
     );
+    if (changed.changes !== 1) {
+      throw conflict("task_changed", "The task changed while the review was recorded.", {
+        task_id: taskId,
+        expected_row_version: task.row_version,
+      });
+    }
   });
 }
 
@@ -1976,6 +1986,42 @@ export async function reconcileOnStartup(): Promise<{ reconciled: number; recove
           updated_at = ?, row_version = row_version + 1
         WHERE id = ? AND current_run_id = ? AND status = 'running'
       `).run(Date.now(), run.task_id, run.id);
+    });
+    recoveryRequired += 1;
+  }
+
+  const splitBrainTasks = db.prepare(`
+    SELECT task.id AS task_id, task.repository_id, run.id AS run_id, run.status AS run_status
+    FROM tasks task
+    JOIN agent_runs run ON run.id = task.current_run_id
+    WHERE task.status = 'running' AND run.status NOT IN ('queued', 'running')
+  `).all() as Array<{ task_id: string; repository_id: string; run_id: string; run_status: string }>;
+  for (const row of splitBrainTasks) {
+    committedMutation((collector) => {
+      recordAuditEvent(collector, {
+        eventType: "task.recovery_required",
+        entityType: "task",
+        entityId: row.task_id,
+        repositoryId: row.repository_id,
+        taskId: row.task_id,
+        runId: row.run_id,
+        payload: {
+          reason: "run_task_terminal_mismatch",
+          run_id: row.run_id,
+          run_status: row.run_status,
+        },
+        provenance: { kind: "restart_reconciliation", source: "sqlite" },
+      });
+      db.prepare(`
+        UPDATE tasks SET status = 'recovery_required', error_code = 'run_task_terminal_mismatch',
+          error_message = 'The current run already reached a durable terminal status before the task projection committed.',
+          blocking_reasons_json = CASE
+            WHEN NOT EXISTS (SELECT 1 FROM json_each(blocking_reasons_json) WHERE value = 'run_task_terminal_mismatch')
+            THEN json_insert(blocking_reasons_json, '$[#]', 'run_task_terminal_mismatch')
+            ELSE blocking_reasons_json END,
+          updated_at = ?, row_version = row_version + 1
+        WHERE id = ? AND status = 'running' AND current_run_id = ?
+      `).run(Date.now(), row.task_id, row.run_id);
     });
     recoveryRequired += 1;
   }

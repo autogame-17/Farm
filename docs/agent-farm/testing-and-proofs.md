@@ -79,7 +79,7 @@ Gate ready 只表示允许真实尝试。若 SDK runtime 返回认证/授权失�
 
 ## 已覆盖的关键证明
 
-冻结后的 release integration 机读 proof 为 **14 个测试文件、61/61 passed、0 failed/cancelled**，所有 node-test cleanup proof 均为 true；proof 同时保留原始 TAP、文件级并发、child exit/signal 与 process-group cleanup arrays。Integration/browser suite 直接覆盖：
+当前 local suite 机读 proof 为 integration **66/66 passed**、Chromium browser **6/6 passed**、0 failed/cancelled，所有 node-test cleanup proof 均为 true；proof 同时保留原始 TAP、文件级并发、child exit/signal 与 process-group cleanup arrays。Integration/browser suite 直接覆盖：
 
 - provider unavailable → run/task blocked；
 - 显式 dependency group；claim/magnet overlap 不成组；claim blocking escalation 与任一侧 release 精确清除；

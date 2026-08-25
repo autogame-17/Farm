@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "agent-farm",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "server", "start"],
+      "port": 7878
+    }
+  ]
+}
