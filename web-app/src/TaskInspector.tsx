@@ -64,7 +64,7 @@ function activeRunStatus(status: string): boolean {
 }
 
 function recoverableRunStatus(status: string): boolean {
-  return ["failed", "error", "crashed", "timeout", "timed_out", "cancelled", "canceled", "provider_auth_blocked", "auth_blocked"].includes(status.toLowerCase());
+  return ["failed", "error", "crashed", "timeout", "timed_out", "cancelled", "canceled", "provider_blocked", "provider_auth_blocked", "sandbox_blocked", "auth_blocked"].includes(status.toLowerCase());
 }
 
 function eventLabel(type: string): string {

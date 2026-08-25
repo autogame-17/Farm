@@ -560,3 +560,39 @@ test("worktree health reports exact registered branch identity", async () => {
     assert.equal(proof.branchesRemoved, true);
   }
 });
+
+test("restart reconciliation recovers a running task whose current run is already terminal", { timeout: 5 * 60_000 }, async () => {
+  const harness = await createHarness("run-task-terminal-mismatch");
+  try {
+    const fixture = await harness.createGitFixture({ "tracked.txt": "base\n" });
+    const server = await harness.startServer();
+    const farm = new FarmApi(server.baseUrl);
+    const seeded = await seedTask(farm, fixture.repository, "Recover a split run/task terminal projection after restart.");
+    const taskId = seeded.task.id;
+    const runId = `split-${randomUUID()}`;
+    await forceSqlite(harness.dataDir, [
+      `INSERT INTO agent_runs (
+         id, task_id, attempt, status, provider_status, created_at, source_event_seq
+       ) SELECT ${sql(runId)}, ${sql(taskId)}, 1, 'cancelled', 'failed', ${Date.now()}, MAX(seq)
+         FROM audit_events;`,
+      `UPDATE tasks SET status = 'running', current_run_id = ${sql(runId)}, updated_at = ${Date.now()},
+         row_version = row_version + 1 WHERE id = ${sql(taskId)};`,
+    ]);
+
+    const restarted = await harness.restartServer();
+    const replayFarm = new FarmApi(restarted.baseUrl);
+    const recovered = await replayFarm.task(taskId);
+    assert.equal(recovered.task.status, "recovery_required");
+    assert.equal(recovered.task.error_code, "run_task_terminal_mismatch");
+    const runRows = await sqliteJson<{ status: string }>(
+      await findSqliteDatabase(harness.dataDir),
+      harness.dataDir,
+      `SELECT status FROM agent_runs WHERE id = ${sql(runId)};`,
+    );
+    assert.equal(runRows[0]?.status, "cancelled");
+  } finally {
+    const proof = await harness.cleanup();
+    assert.equal(proof.worktreesPruned, true);
+    assert.equal(proof.branchesRemoved, true);
+  }
+});

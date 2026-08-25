@@ -33,6 +33,7 @@ Migration 位于 `server/migrations`。当前顺序：
 1. `000_legacy_compat.sql`
 2. `001_hyperedge_core.sql`
 3. `002_legacy_workspace_backfill.sql`
+4. `003_sandbox_blocked_status.sql`
 
 Runner 只接受 `^\d+[_-].+\.sql$`。Filename leading digits 是唯一 version，按任意长度十进制 version 排序，同 version 重复会 fail-fast；每个文件在独立 SQLite transaction 中应用。成功后 `schema_migrations` 保存：
 
@@ -126,10 +127,11 @@ failed
 cancelled
 timed_out
 provider_blocked
+sandbox_blocked
 crashed
 ```
 
-`provider_blocked` 是终态证据，不是 succeeded 的别名。Cost 为 SDK reported `total_cost_usd`，合法地可以为 `0`；缺失 result 时为 `NULL`，无估算列或估算路径。
+`provider_blocked` 与 `sandbox_blocked` 都是终态证据，不是 succeeded 的别名。`sandbox_blocked` 的 `provider_status` 必须是 `not_run`，不能伪装成 provider success/failure。Cost 为 SDK reported `total_cost_usd`，合法地可以为 `0`；缺失 result 时为 `NULL`，无估算列或估算路径。
 
 ### `artifacts`
 

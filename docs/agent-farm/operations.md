@@ -76,7 +76,7 @@ pnpm --dir web-app build
 7. 再使用真实数据目录启动。
 8. 运行 residual scan 并对比 ledger cursor、task 数和 cleanup proof。
 
-Migration 是有版本、带 SHA-256 的 forward migration。已有非空 SQLite 先 read-only 校验：数据库含任何当前 binary 不认识的 version，或已知 filename/checksum 漂移，都会在创建 WAL/metadata/reconciliation event 前 zero-write fail-fast。当前 002 在一个 migration transaction 中创建 `ledger_metadata` schema、补齐 repository provenance 与 legacy workspace/event backfill；fresh database 的 singleton UUID `ledger_id` row 在 migrations 成功后由启动初始化逻辑写入。Checksum/SQL 任一步失败会整体回滚 002，不留下 partial schema/backfill。已应用 SQL 文件不得原地修改；新增 schema 必须新增 migration 文件。
+Migration 是有版本、带 SHA-256 的 forward migration。已有非空 SQLite 先 read-only 校验：数据库含任何当前 binary 不认识的 version，或已知 filename/checksum 漂移，都会在创建 WAL/metadata/reconciliation event 前 zero-write fail-fast。当前 002 在一个 migration transaction 中创建 `ledger_metadata` schema、补齐 repository provenance 与 legacy workspace/event backfill；003 重建 `agent_runs` 以加入 `sandbox_blocked` CHECK。fresh database 的 singleton UUID `ledger_id` row 在 migrations 成功后由启动初始化逻辑写入。Checksum/SQL 任一步失败会整体回滚该文件，不留下 partial schema/backfill。已应用 SQL 文件不得原地修改；新增 schema 必须新增 migration 文件。
 
 ### Migration 回滚
 
@@ -111,11 +111,12 @@ Migration 是有版本、带 SHA-256 的 forward migration。已有非空 SQLite
 1. 清除进程死亡后不再有效的 repository locks；
 2. 将没有 durable SDK result 的 queued/running run 标为 crashed；
 3. 将对应 task 标为 `recovery_required`，不伪造 SDK session resume；
-4. 对 interrupted worktree prepare 检查确定性路径、branch 与 base SHA：三者精确匹配才补齐投影，否则不触碰未知目录；
-5. 对 interrupted harvest 仅检查 base first-parent、journal `pre_commit` 之后的有限历史中的精确 `Agent-Farm-Task` trailer；
-6. 如果 commit 已落地，补写 confirmed outcome 并 cleanup；
-7. 如果未落地且 journal 同时有可信 `pre_commit` 与 `base_branch`，在 branch 精确匹配时 abort/reset/clean 回到该 SHA，并验证 HEAD/clean；
-8. 缺少边界、branch 不匹配或任何 Git 验证失败时保留 `recovery_required` / `needs_recovery` 并记录审计证据。
+4. 若 task 仍为 `running` 但 `current_run_id` 已是终态，标 `run_task_terminal_mismatch` / `recovery_required`，不猜测成功；
+5. 对 interrupted worktree prepare 检查确定性路径、branch 与 base SHA：三者精确匹配才补齐投影，否则不触碰未知目录；
+6. 对 interrupted harvest 仅检查 base first-parent、journal `pre_commit` 之后的有限历史中的精确 `Agent-Farm-Task` trailer；
+7. 如果 commit 已落地，补写 confirmed outcome 并 cleanup；
+8. 如果未落地且 journal 同时有可信 `pre_commit` 与 `base_branch`，在 branch 精确匹配时 abort/reset/clean 回到该 SHA，并验证 HEAD/clean；
+9. 缺少边界、branch 不匹配或任何 Git 验证失败时保留 `recovery_required` / `needs_recovery` 并记录审计证据。
 
 `POST /api/tasks/:id/runs/recover` 会创建新 run lineage，不会隐式继续旧迭代器。
 
@@ -220,8 +221,9 @@ sqlite3 /path/to/db.sqlite 'SELECT MIN(seq), MAX(seq), COUNT(*) FROM audit_event
 
 - 所有 Git 调用使用 `execFile` 参数数组，不使用 shell 字符串插值。
 - claim/magnet path 必须是仓库相对路径，拒绝 absolute、`..`、NUL 和 `.git`。
-- Agent SDK 工具 allowlist 仅包含本地读写/搜索/Bash；网络、peer agent、workflow 和外部消息工具被禁用。
-- SDK query 使用 `settingSources: []`、`permissionMode: "default"` 与 `canUseTool` path guard；sandbox 必须可用，否则 fail closed。读写仅限 task worktree，网络、Unix socket 与 local bind 均拒绝。
+- Agent SDK 工具 allowlist 仅包含本地读写/搜索；Bash 只经 `mcp__workspace__bash` 进入 inner sandbox。网络、peer agent、workflow 和外部消息工具被禁用。
+- SDK query 使用 `settingSources: []`、`permissionMode: "default"` 与 `canUseTool` path guard；sandbox 必须可用，否则 fail closed。读写仅限 task worktree；linked-worktree 的 gitdir/commondir 只读。网络、Unix socket 与 local bind 均拒绝。
+- Ledger mutation 先提交 SQLite，再发布 WebSocket。发布失败只关闭受影响连接并记日志，不得回滚已提交 audit event；客户端必须用 REST/WS `after_seq` replay 补齐。
 - Server 错误响应带 request ID；未知异常不返回 secret。WebSocket upgrade 不经过该 middleware，需用 cursor、Origin/Host、close code 和 `[ws]` log 关联。
 - UI 中展示 prompt/event/details 前执行敏感文本 redaction。
 - `/assets` 只在 loopback bind 时注册，但映射整个 `FarmCreator/assets`。现有 Cocos/legacy 美术资源仅供学习研究，禁止通过反向代理或其他方式公开发布。

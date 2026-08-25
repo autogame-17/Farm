@@ -41,7 +41,7 @@ pnpm --dir e2e test:local
 5. 将新代码、migrations、dependencies 和 `web-app/dist` 放到 staging release directory。
 6. 复制停服备份到独立 staging data directory；不要让 staging 指向生产目录或生产 repositories 的可写副本。
 7. 使用独立 port 和 loopback host 启动 staging。已有数据库先 read-only 检查 unknown migration/checksum；不兼容时应在任何 DB/WAL/metadata/reconciliation 写入前退出。兼容时才应用 forward migrations并执行 restart reconciliation。正常启动会追加 `server.reconciliation.completed`，并可能将 interrupted run/operation 收敛为 crashed/reconciled/recovery-required；staging 副本不再与备份逐字节相等。
-8. 在 staging 副本检查 `PRAGMA integrity_check`、000/001/002 migration registry、`ledger_metadata`、legacy backfill（若有旧行）、ledger replay、residual artifact 和 Git registry，并把正常 startup 新增事件纳入预期。
+8. 在 staging 副本检查 `PRAGMA integrity_check`、000/001/002/003 migration registry、`ledger_metadata`、legacy backfill（若有旧行）、ledger replay、residual artifact 和 Git registry，并把正常 startup 新增事件纳入预期。
 
 ## 3. Start
 

@@ -19,6 +19,7 @@ import {
   AgentSandboxError,
   cleanupWorkspaceSandbox,
   createWorkspaceSandbox,
+  gitReadRoots,
   markWorkspaceSandboxReleased,
   stopWorkspaceCommands,
   verifyWorkspaceSandbox,
@@ -353,6 +354,9 @@ async function writeOuterPolicy(
     if (existing) readRoots.add(existing);
   }
 
+  const gitRoots = await gitReadRoots(cwd);
+  for (const root of gitRoots) readRoots.add(root);
+
   const policy: SandboxRuntimeConfig = {
     network: {
       allowedDomains: providerNetworkDomains(kind),
@@ -365,7 +369,7 @@ async function writeOuterPolicy(
       denyRead: [path.parse(cwd).root],
       allowRead: [...readRoots],
       allowWrite: [cwd, runDir, tempDir],
-      denyWrite: [path.join(cwd, ".git")],
+      denyWrite: [path.join(cwd, ".git"), ...gitRoots],
     },
     enableWeakerNestedSandbox: false,
     enableWeakerNetworkIsolation: false,

@@ -128,7 +128,14 @@ export function recordAuditEvent(collector: EventCollector, input: AuditEventInp
 export function committedMutation<T>(mutate: (collector: EventCollector) => T): T {
   const collector: EventCollector = { rows: [] };
   const value = db.transaction(() => mutate(collector))();
-  for (const row of collector.rows) publishLedgerEvent(row);
+  for (const row of collector.rows) {
+    try {
+      publishLedgerEvent(row);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error(`[ledger] post-commit publish failed seq=${row.seq}: ${detail}`);
+    }
+  }
   return value;
 }
 

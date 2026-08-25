@@ -47,7 +47,7 @@ run:  queued → running
 task: seeded → running
 ```
 
-Start/diff/harvest 首先验证 filesystem path、Git registry 与 expected `agent-farm/<task-id>` branch identity；外部 switch 到其他 branch 或 detached HEAD 会以 `worktree_mismatch`/branch blocker 拒绝，不能在错误树上执行。SDK query 使用 task worktree 作为 `cwd`，保存 session，并只允许 Read/Write/Edit/Glob/Grep/Bash。`settingSources: []` 阻止 settings 为 run 加载额外行为。运行时启用 sandbox 且 `failIfUnavailable: true`，读写限制到该 worktree，禁止网络、Unix socket、local bind、peer Agent、workflow 与外部消息。Permission mode 使用 `default` 并由 `canUseTool` 做 path allowlist；不是 bypass permissions，也不会在 sandbox 不可用时降级执行。
+Start/diff/harvest 首先验证 filesystem path、Git registry 与 expected `agent-farm/<task-id>` branch identity；外部 switch 到其他 branch 或 detached HEAD 会以 `worktree_mismatch`/branch blocker 拒绝，不能在错误树上执行。SDK query 使用 task worktree 作为 `cwd`，保存 session，并只允许 Read/Write/Edit/Glob/Grep；built-in Bash 禁用，workspace 命令走 `mcp__workspace__bash`。`settingSources: []` 阻止 settings 为 run 加载额外行为。运行时启用两级 sandbox 且 fail closed，读写限制到该 worktree，linked-worktree gitdir/commondir 只读，禁止网络、Unix socket、local bind、peer Agent、workflow 与外部消息。Permission mode 使用 `default` 并由 `canUseTool` 做 path allowlist；不是 bypass permissions，也不会在 sandbox 不可用时降级执行。
 
 Terminal 映射：
 
@@ -55,6 +55,7 @@ Terminal 映射：
 |---|---|---|
 | result subtype `success` 且 `is_error=false`，diff capture 成功 | `succeeded` | `review_pending` |
 | provider 配置缺失或认证/授权拒绝 | `provider_blocked` | `blocked` |
+| sandbox 不可用或隔离自检失败 | `sandbox_blocked` | `blocked`（`provider_status=not_run`） |
 | 显式 cancel | `cancelled` | `cancelled` |
 | timeout | `timed_out` | `failed` |
 | SDK `error_*` result / runtime failure | `failed` | `failed` |
